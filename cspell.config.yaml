@@ -1,0 +1,28 @@
+version: "0.2"
+ignorePaths: []
+dictionaryDefinitions: []
+dictionaries: []
+words:
+  - autotag
+  - aquasecurity
+  - Buildx
+  - Dewpt
+  - distroless
+  - extldflags
+  - installsuffix
+  - KCASANFR
+  - KCORAMAH
+  - myapp
+  - nonroot
+  - opencontainers
+  - Precip
+  - rsec
+  - sarif
+  - seccomp
+  - stylesheet
+  - tzdata
+  - Winddir
+  - Wunderground
+  - zoneinfo
+ignoreWords: []
+import: []

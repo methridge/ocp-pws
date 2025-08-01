@@ -1,0 +1,22 @@
+.logo {
+  max-height: 200px;
+  margin-bottom: 50px;
+  margin-top: 10px;
+}
+.pws-details {
+  border-top: 1px solid #a5a5a5;
+  margin-top: 10px;
+  padding-top: 25px;
+  border-bottom: 1px solid #a5a5a5;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+}
+.footer {
+  font-size: 0.8em;
+  color: #313131;
+  margin-top: 25px;
+  float: right;
+}
+.footer a {
+  color: #313131;
+}

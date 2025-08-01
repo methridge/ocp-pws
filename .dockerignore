@@ -1,0 +1,39 @@
+# Git files
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+LICENSE
+
+# Build artifacts
+pws
+*.log
+
+# Development files
+.envrc
+.pre-commit-config.yaml
+cspell.config.yaml
+Taskfile.yaml
+
+# Docker files
+Dockerfile*
+.dockerignore
+
+# Build scripts
+run-container.sh
+
+# IDE files
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp

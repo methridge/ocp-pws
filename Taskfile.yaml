@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# https://taskfile.dev
+
+version: "3"
+
+vars:
+  BINARY_NAME: pws
+  LDFLAGS: "-w -s"
+  IMAGE_NAME: "ocp-pws"
+  IMAGE_TAG: "minimal"
+  PLATFORM: "linux/amd64"
+  DOCKERFILE: "Dockerfile.minimal"
+
+dotenv: [".envrc"]
+
+includes:
+  git:
+    taskfile: ~/.config/taskfile/git.yaml
+    flatten: true
+  go:
+    taskfile: ~/.config/taskfile/go.yaml
+    flatten: true
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list-all
+
+  help:
+    desc: Show this help message
+    cmds:
+      - task --list-all
+
+  build-container:
+    desc: Build container
+    cmds:
+      - echo "🐳 Building container..."
+      - |
+        docker build \
+          --platform {{.PLATFORM}} \
+          --tag {{.IMAGE_NAME}}:{{.IMAGE_TAG}} \
+          --file {{.DOCKERFILE}} .
+      - echo "✅ Container build complete"
+
+  run-container:
+    desc: Run the container locally
+    cmds:
+      - echo "🐳 Running container..."
+      - ./run-container.sh
