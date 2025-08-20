@@ -133,6 +133,11 @@ func main() {
 			return
 		}
 
+		// Add cache control headers to prevent caching
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+
 		url := fmt.Sprintf("%s?stationId=%s&format=json&units=%s&apiKey=%s",
 			api,
 			sid,
