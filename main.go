@@ -70,21 +70,11 @@ type Index struct {
 	RandomSecret string
 }
 
-var api, sid, units, key, rsec string
 var httpClient = &http.Client{
 	Timeout: 10 * time.Second,
 }
 
-func main() {
-	// Debug printing of Environment
-	if _, ok := os.LookupEnv("DEBUG"); ok {
-		for _, element := range os.Environ() {
-			variable := strings.Split(element, "=")
-			fmt.Println(variable[0], "=>", variable[1])
-		}
-	}
-
-	// Read Config Environment variables
+func readEnvVars() (api, sid, units, key, rsec string, err error) {
 	envVars := map[string]*string{
 		"API":           &api,
 		"STATION_ID":    &sid,
@@ -97,7 +87,18 @@ func main() {
 		if value, ok := os.LookupEnv(envName); ok {
 			*envVar = value
 		} else {
-			log.Fatalf("%s environment variable not set", envName)
+			return "", "", "", "", "", fmt.Errorf("%s environment variable not set", envName)
+		}
+	}
+	return
+}
+
+func main() {
+	// Debug printing of Environment
+	if _, ok := os.LookupEnv("DEBUG"); ok {
+		for _, element := range os.Environ() {
+			variable := strings.Split(element, "=")
+			fmt.Println(variable[0], "=>", variable[1])
 		}
 	}
 
@@ -109,6 +110,13 @@ func main() {
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Re-read environment variables on each request
+		api, sid, units, key, rsec, err := readEnvVars()
+		if err != nil {
+			http.Error(w, "Configuration error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		url := fmt.Sprintf("%s?stationId=%s&format=json&units=%s&apiKey=%s",
 			api,
 			sid,
