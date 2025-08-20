@@ -78,28 +78,30 @@ var httpClient = &http.Client{
 var api, sid, units, key string
 
 func readAPIConfig() error {
-	envVars := map[string]*string{
-		"API":        &api,
-		"STATION_ID": &sid,
-		"UNITS":      &units,
-		"API_KEY":    &key,
+	secretFiles := map[string]*string{
+		"api":   &api,
+		"sid":   &sid,
+		"units": &units,
+		"key":   &key,
 	}
 
-	for envName, envVar := range envVars {
-		if value, ok := os.LookupEnv(envName); ok {
-			*envVar = value
-		} else {
-			return fmt.Errorf("%s environment variable not set", envName)
+	for fileName, envVar := range secretFiles {
+		filePath := fmt.Sprintf("/mnt/secrets/%s", fileName)
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to read secret file %s: %v", fileName, err)
 		}
+		*envVar = strings.TrimSpace(string(content))
 	}
 	return nil
 }
 
 func readRandomSecret() (string, error) {
-	if value, ok := os.LookupEnv("RANDOM_SECRET"); ok {
-		return value, nil
+	content, err := os.ReadFile("/mnt/secrets/rsec")
+	if err != nil {
+		return "", fmt.Errorf("failed to read random_secret file: %v", err)
 	}
-	return "", fmt.Errorf("RANDOM_SECRET environment variable not set")
+	return strings.TrimSpace(string(content)), nil
 }
 
 func main() {
