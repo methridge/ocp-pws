@@ -74,26 +74,40 @@ var httpClient = &http.Client{
 	Timeout: 10 * time.Second,
 }
 
-func readEnvVars() (api, sid, units, key, rsec string, err error) {
+// Global variables for API configuration read at startup
+var api, sid, units, key string
+
+func readAPIConfig() error {
 	envVars := map[string]*string{
-		"API":           &api,
-		"STATION_ID":    &sid,
-		"UNITS":         &units,
-		"API_KEY":       &key,
-		"RANDOM_SECRET": &rsec,
+		"API":        &api,
+		"STATION_ID": &sid,
+		"UNITS":      &units,
+		"API_KEY":    &key,
 	}
 
 	for envName, envVar := range envVars {
 		if value, ok := os.LookupEnv(envName); ok {
 			*envVar = value
 		} else {
-			return "", "", "", "", "", fmt.Errorf("%s environment variable not set", envName)
+			return fmt.Errorf("%s environment variable not set", envName)
 		}
 	}
-	return
+	return nil
+}
+
+func readRandomSecret() (string, error) {
+	if value, ok := os.LookupEnv("RANDOM_SECRET"); ok {
+		return value, nil
+	}
+	return "", fmt.Errorf("RANDOM_SECRET environment variable not set")
 }
 
 func main() {
+	// Read API configuration at startup
+	if err := readAPIConfig(); err != nil {
+		log.Fatal("Configuration error:", err)
+	}
+
 	// Debug printing of Environment
 	if _, ok := os.LookupEnv("DEBUG"); ok {
 		for _, element := range os.Environ() {
@@ -110,8 +124,8 @@ func main() {
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Re-read environment variables on each request
-		api, sid, units, key, rsec, err := readEnvVars()
+		// Read only the random secret on each request
+		rsec, err := readRandomSecret()
 		if err != nil {
 			http.Error(w, "Configuration error: "+err.Error(), http.StatusInternalServerError)
 			return
