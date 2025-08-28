@@ -129,6 +129,7 @@ func main() {
 		// Read only the random secret on each request
 		rsec, err := readRandomSecret()
 		if err != nil {
+			log.Printf("Error reading random secret: %v", err)
 			http.Error(w, "Configuration error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -145,63 +146,112 @@ func main() {
 			key,
 		)
 
+		log.Printf("Making API request to: %s", strings.Replace(url, key, "***REDACTED***", 1))
+
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
-			fmt.Print(err.Error())
+			log.Printf("Error creating HTTP request: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
 		}
 		req.Header.Add("Accept", "application/json")
 		req.Header.Add("Content-Type", "application/json")
+
 		resp, err := httpClient.Do(req)
 		if err != nil {
-			fmt.Print(err.Error())
+			log.Printf("Error making HTTP request: %v", err)
+			http.Error(w, "API request failed", http.StatusInternalServerError)
+			return
 		}
 		defer resp.Body.Close()
+
+		log.Printf("API response status: %d %s", resp.StatusCode, resp.Status)
+
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
-			fmt.Print(err.Error())
+			log.Printf("Error reading response body: %v", err)
+			http.Error(w, "Error reading API response", http.StatusInternalServerError)
+			return
 		}
+
+		log.Printf("API response body length: %d bytes", len(bodyBytes))
+		if len(bodyBytes) > 0 {
+			log.Printf("Raw API response: %s", string(bodyBytes))
+		}
+		log.Printf("API response body length: %d bytes", len(bodyBytes))
+		if len(bodyBytes) > 0 {
+			log.Printf("Raw API response: %s", string(bodyBytes))
+		}
+
 		var responseObject weatherCurrent
-		json.Unmarshal(bodyBytes, &responseObject)
+		if err := json.Unmarshal(bodyBytes, &responseObject); err != nil {
+			log.Printf("Error unmarshaling JSON: %v", err)
+			log.Printf("Raw response that failed to unmarshal: %s", string(bodyBytes))
+			http.Error(w, "Error parsing API response", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("Number of observations in response: %d", len(responseObject.Observations))
+
+		if len(responseObject.Observations) == 0 {
+			log.Printf("No observations found in API response")
+			http.Error(w, "No weather data available", http.StatusServiceUnavailable)
+			return
+		}
+
 		if _, ok := os.LookupEnv("DEBUG"); ok {
 			fmt.Fprintf(w, "API Response as struct %+v\n", responseObject)
 		}
+
+		obs := responseObject.Observations[0]
+		log.Printf("Processing observation from station: %s, time: %s", obs.StationID, obs.ObsTimeLocal)
 		var feelsLikeF, feelsLikeC int
-		if responseObject.Observations[0].Imperial.Temp > 70 {
-			feelsLikeF = responseObject.Observations[0].Imperial.HeatIndex
-			feelsLikeC = (((responseObject.Observations[0].Imperial.HeatIndex - 32) * 5) / 9)
+		if obs.Imperial.Temp > 70 {
+			feelsLikeF = obs.Imperial.HeatIndex
+			feelsLikeC = (((obs.Imperial.HeatIndex - 32) * 5) / 9)
 		} else {
-			feelsLikeF = responseObject.Observations[0].Imperial.WindChill
-			feelsLikeC = (((responseObject.Observations[0].Imperial.WindChill - 32) * 5) / 9)
+			feelsLikeF = obs.Imperial.WindChill
+			feelsLikeC = (((obs.Imperial.WindChill - 32) * 5) / 9)
 		}
 		compassDirs := []string{"N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW", "N"}
-		compassIndex := responseObject.Observations[0].Winddir / 22
+		compassIndex := obs.Winddir / 22
+
+		// Ensure compass index is within bounds
+		if compassIndex >= len(compassDirs) {
+			compassIndex = len(compassDirs) - 1
+		}
+
 		index := Index{
-			responseObject.Observations[0].StationID,
-			responseObject.Observations[0].ObsTimeLocal,
-			responseObject.Observations[0].Imperial.Temp,
-			(((responseObject.Observations[0].Imperial.Temp - 32) * 5) / 9),
+			obs.StationID,
+			obs.ObsTimeLocal,
+			obs.Imperial.Temp,
+			(((obs.Imperial.Temp - 32) * 5) / 9),
 			feelsLikeF,
 			feelsLikeC,
-			responseObject.Observations[0].Imperial.Dewpt,
-			(((responseObject.Observations[0].Imperial.Dewpt - 32) * 5) / 9),
-			responseObject.Observations[0].Humidity,
-			responseObject.Observations[0].Imperial.WindSpeed,
-			responseObject.Observations[0].Imperial.WindGust,
+			obs.Imperial.Dewpt,
+			(((obs.Imperial.Dewpt - 32) * 5) / 9),
+			obs.Humidity,
+			obs.Imperial.WindSpeed,
+			obs.Imperial.WindGust,
 			compassDirs[compassIndex],
-			responseObject.Observations[0].Winddir,
+			obs.Winddir,
 			rsec,
 		}
 
 		// Parse template from embedded files
 		tmpl, err := template.ParseFS(templateFiles, "templates/index.html")
 		if err != nil {
+			log.Printf("Error parsing template: %v", err)
 			http.Error(w, "Template parsing error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		if err := tmpl.ExecuteTemplate(w, "index.html", index); err != nil {
+			log.Printf("Error executing template: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	})
-	fmt.Println(http.ListenAndServe(":8080", nil))
+
+	log.Println("Starting server on :8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
