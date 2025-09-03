@@ -173,23 +173,16 @@ func parseObsTimeLocal(obsTimeLocal string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse obsTimeLocal: %s", obsTimeLocal)
 }
 
-// isDataFresh checks if the observation data is less than 5 minutes old
-func isDataFresh(obsTimeLocal string) (bool, time.Time, error) {
-	obsTime, err := parseObsTimeLocal(obsTimeLocal)
-	if err != nil {
-		log.Printf("Warning: Could not parse obsTimeLocal '%s': %v", obsTimeLocal, err)
-		// Fallback to current time if parsing fails
-		return true, time.Now(), nil
-	}
-
-	now := time.Now()
-	age := now.Sub(obsTime)
+// isDataFresh checks if the observation data is less than 5 minutes old using UTC time
+func isDataFresh(obsTimeUtc time.Time) (bool, time.Time, error) {
+	now := time.Now().UTC()
+	age := now.Sub(obsTimeUtc)
 	isFresh := age <= 5*time.Minute
 
-	log.Printf("Data observation time: %s, current time: %s, age: %v, fresh: %t",
-		obsTime.Format("15:04:05"), now.Format("15:04:05"), age, isFresh)
+	log.Printf("Data observation time (UTC): %s, current time (UTC): %s, age: %v, fresh: %t",
+		obsTimeUtc.Format("15:04:05"), now.Format("15:04:05"), age, isFresh)
 
-	return isFresh, obsTime, nil
+	return isFresh, obsTimeUtc, nil
 }
 
 // shouldFetchNewData determines if we should fetch new weather data
@@ -272,7 +265,7 @@ func fetchWeatherData() (weatherCurrent, error) {
 
 	// Check if the returned data is fresh
 	obs := responseObject.Observations[0]
-	isFresh, obsTime, err := isDataFresh(obs.ObsTimeLocal)
+	isFresh, obsTime, err := isDataFresh(obs.ObsTimeUtc)
 	if err != nil {
 		log.Printf("Warning: Could not determine data freshness: %v", err)
 	}
@@ -287,7 +280,7 @@ func fetchWeatherData() (weatherCurrent, error) {
 	cache.mu.Unlock()
 
 	if !isFresh {
-		return weatherCurrent{}, fmt.Errorf("API returned stale data (observation time: %s)", obs.ObsTimeLocal)
+		return weatherCurrent{}, fmt.Errorf("API returned stale data (observation time UTC: %s)", obs.ObsTimeUtc.Format(time.RFC3339))
 	}
 
 	return responseObject, nil
@@ -439,6 +432,13 @@ func main() {
 
 		if err := tmpl.ExecuteTemplate(w, "index.html", index); err != nil {
 			log.Printf("Error executing template: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
+
+	log.Println("Starting server on :8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	})
