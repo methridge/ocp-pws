@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -78,6 +79,9 @@ var httpClient = &http.Client{
 // Global variables for API configuration read at startup
 var api, sid, units, key string
 
+// Configurable buffer time (default 30 seconds)
+var fetchBufferSeconds = 30
+
 // Cache for weather data
 type weatherCache struct {
 	data        weatherCurrent
@@ -103,6 +107,26 @@ func readAPIConfig() error {
 		}
 		*envVar = strings.TrimSpace(string(content))
 	}
+
+	// Configure fetch buffer (priority: env var > file > default)
+	if envBuffer := os.Getenv("FETCH_BUFFER_SECONDS"); envBuffer != "" {
+		if buffer, err := strconv.Atoi(envBuffer); err == nil && buffer > 0 {
+			fetchBufferSeconds = buffer
+			log.Printf("Using fetch buffer from env var: %d seconds", fetchBufferSeconds)
+		} else {
+			log.Printf("Invalid FETCH_BUFFER_SECONDS env var, using default: %d seconds", fetchBufferSeconds)
+		}
+	} else if bufferContent, err := os.ReadFile("/mnt/secrets/fetch_buffer"); err == nil {
+		if buffer, parseErr := strconv.Atoi(strings.TrimSpace(string(bufferContent))); parseErr == nil && buffer > 0 {
+			fetchBufferSeconds = buffer
+			log.Printf("Using fetch buffer from file: %d seconds", fetchBufferSeconds)
+		} else {
+			log.Printf("Invalid fetch_buffer file format, using default: %d seconds", fetchBufferSeconds)
+		}
+	} else {
+		log.Printf("Using default fetch buffer: %d seconds", fetchBufferSeconds)
+	}
+
 	return nil
 }
 
@@ -114,9 +138,17 @@ func readRandomSecret() (string, error) {
 	return strings.TrimSpace(string(content)), nil
 }
 
-// isOnFiveMinuteBoundary checks if the current time is on a 5-minute boundary
-func isOnFiveMinuteBoundary(t time.Time) bool {
-	return t.Minute()%5 == 0
+// isWithinFetchWindow checks if the current time is within the fetch window
+// The fetch window is from the 5-minute boundary up to fetchBufferSeconds after
+func isWithinFetchWindow(t time.Time) bool {
+	// Get the current 5-minute window start
+	windowStart := t.Truncate(5 * time.Minute)
+
+	// Calculate seconds since the window start
+	secondsSinceWindow := int(t.Sub(windowStart).Seconds())
+
+	// Allow fetching from 0 to fetchBufferSeconds after each 5-minute boundary
+	return secondsSinceWindow >= 0 && secondsSinceWindow <= fetchBufferSeconds
 }
 
 // shouldFetchNewData determines if we should fetch new weather data
@@ -129,8 +161,8 @@ func shouldFetchNewData(t time.Time) bool {
 		return true
 	}
 
-	// Only fetch on 5-minute boundaries
-	if !isOnFiveMinuteBoundary(t) {
+	// Only fetch within the allowed window (5-min boundary + 30 seconds)
+	if !isWithinFetchWindow(t) {
 		return false
 	}
 
@@ -204,6 +236,8 @@ func getCachedWeatherData() (weatherCurrent, error) {
 	now := time.Now()
 
 	if shouldFetchNewData(now) {
+		log.Printf("Fetching new weather data at %s (within %d-second buffer window)",
+			now.Format("15:04:05"), fetchBufferSeconds)
 		return fetchWeatherData()
 	}
 
@@ -217,7 +251,10 @@ func getCachedWeatherData() (weatherCurrent, error) {
 		return fetchWeatherData()
 	}
 
-	log.Printf("Using cached weather data from: %s", cache.lastFetched.Format(time.RFC3339))
+	windowStart := now.Truncate(5 * time.Minute)
+	secondsSinceWindow := int(now.Sub(windowStart).Seconds())
+	log.Printf("Using cached weather data from: %s (current time: %s, %d seconds after 5-min boundary)",
+		cache.lastFetched.Format(time.RFC3339), now.Format("15:04:05"), secondsSinceWindow)
 	return cache.data, nil
 }
 
