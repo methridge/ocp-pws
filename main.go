@@ -439,10 +439,3 @@ func main() {
 	log.Println("Starting server on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-	})
-
-	log.Println("Starting server on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
-}
