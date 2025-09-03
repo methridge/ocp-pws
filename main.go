@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 )
@@ -77,6 +78,15 @@ var httpClient = &http.Client{
 // Global variables for API configuration read at startup
 var api, sid, units, key string
 
+// Cache for weather data
+type weatherCache struct {
+	data        weatherCurrent
+	lastFetched time.Time
+	mu          sync.RWMutex
+}
+
+var cache = &weatherCache{}
+
 func readAPIConfig() error {
 	secretFiles := map[string]*string{
 		"api":   &api,
@@ -102,6 +112,113 @@ func readRandomSecret() (string, error) {
 		return "", fmt.Errorf("failed to read random_secret file: %v", err)
 	}
 	return strings.TrimSpace(string(content)), nil
+}
+
+// isOnFiveMinuteBoundary checks if the current time is on a 5-minute boundary
+func isOnFiveMinuteBoundary(t time.Time) bool {
+	return t.Minute()%5 == 0
+}
+
+// shouldFetchNewData determines if we should fetch new weather data
+func shouldFetchNewData(t time.Time) bool {
+	cache.mu.RLock()
+	defer cache.mu.RUnlock()
+
+	// If we have no data, fetch it
+	if cache.lastFetched.IsZero() {
+		return true
+	}
+
+	// Only fetch on 5-minute boundaries
+	if !isOnFiveMinuteBoundary(t) {
+		return false
+	}
+
+	// Check if we haven't fetched data for this 5-minute window yet
+	lastFetchWindow := cache.lastFetched.Truncate(5 * time.Minute)
+	currentWindow := t.Truncate(5 * time.Minute)
+
+	return currentWindow.After(lastFetchWindow)
+}
+
+// fetchWeatherData fetches weather data from the API and caches it
+func fetchWeatherData() (weatherCurrent, error) {
+	url := fmt.Sprintf("%s?stationId=%s&format=json&units=%s&apiKey=%s",
+		api,
+		sid,
+		units,
+		key,
+	)
+
+	log.Printf("Making API request to: %s", strings.Replace(url, key, "***REDACTED***", 1))
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return weatherCurrent{}, fmt.Errorf("error creating HTTP request: %v", err)
+	}
+	req.Header.Add("Accept", "application/json")
+	req.Header.Add("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return weatherCurrent{}, fmt.Errorf("error making HTTP request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("API response status: %d %s", resp.StatusCode, resp.Status)
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return weatherCurrent{}, fmt.Errorf("error reading response body: %v", err)
+	}
+
+	log.Printf("API response body length: %d bytes", len(bodyBytes))
+	if len(bodyBytes) > 0 {
+		log.Printf("Raw API response: %s", string(bodyBytes))
+	}
+
+	var responseObject weatherCurrent
+	if err := json.Unmarshal(bodyBytes, &responseObject); err != nil {
+		log.Printf("Error unmarshaling JSON: %v", err)
+		log.Printf("Raw response that failed to unmarshal: %s", string(bodyBytes))
+		return weatherCurrent{}, fmt.Errorf("error parsing API response: %v", err)
+	}
+
+	log.Printf("Number of observations in response: %d", len(responseObject.Observations))
+
+	if len(responseObject.Observations) == 0 {
+		return weatherCurrent{}, fmt.Errorf("no observations found in API response")
+	}
+
+	// Cache the data
+	cache.mu.Lock()
+	cache.data = responseObject
+	cache.lastFetched = time.Now()
+	cache.mu.Unlock()
+
+	return responseObject, nil
+}
+
+// getCachedWeatherData returns cached weather data or fetches new data if needed
+func getCachedWeatherData() (weatherCurrent, error) {
+	now := time.Now()
+
+	if shouldFetchNewData(now) {
+		return fetchWeatherData()
+	}
+
+	// Return cached data
+	cache.mu.RLock()
+	defer cache.mu.RUnlock()
+
+	if cache.lastFetched.IsZero() {
+		// This shouldn't happen due to shouldFetchNewData logic, but handle it anyway
+		cache.mu.RUnlock()
+		return fetchWeatherData()
+	}
+
+	log.Printf("Using cached weather data from: %s", cache.lastFetched.Format(time.RFC3339))
+	return cache.data, nil
 }
 
 func main() {
@@ -139,63 +256,11 @@ func main() {
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
 
-		url := fmt.Sprintf("%s?stationId=%s&format=json&units=%s&apiKey=%s",
-			api,
-			sid,
-			units,
-			key,
-		)
-
-		log.Printf("Making API request to: %s", strings.Replace(url, key, "***REDACTED***", 1))
-
-		req, err := http.NewRequest("GET", url, nil)
+		// Get weather data (cached or fresh)
+		responseObject, err := getCachedWeatherData()
 		if err != nil {
-			log.Printf("Error creating HTTP request: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-		req.Header.Add("Accept", "application/json")
-		req.Header.Add("Content-Type", "application/json")
-
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			log.Printf("Error making HTTP request: %v", err)
-			http.Error(w, "API request failed", http.StatusInternalServerError)
-			return
-		}
-		defer resp.Body.Close()
-
-		log.Printf("API response status: %d %s", resp.StatusCode, resp.Status)
-
-		bodyBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			log.Printf("Error reading response body: %v", err)
-			http.Error(w, "Error reading API response", http.StatusInternalServerError)
-			return
-		}
-
-		log.Printf("API response body length: %d bytes", len(bodyBytes))
-		if len(bodyBytes) > 0 {
-			log.Printf("Raw API response: %s", string(bodyBytes))
-		}
-		log.Printf("API response body length: %d bytes", len(bodyBytes))
-		if len(bodyBytes) > 0 {
-			log.Printf("Raw API response: %s", string(bodyBytes))
-		}
-
-		var responseObject weatherCurrent
-		if err := json.Unmarshal(bodyBytes, &responseObject); err != nil {
-			log.Printf("Error unmarshaling JSON: %v", err)
-			log.Printf("Raw response that failed to unmarshal: %s", string(bodyBytes))
-			http.Error(w, "Error parsing API response", http.StatusInternalServerError)
-			return
-		}
-
-		log.Printf("Number of observations in response: %d", len(responseObject.Observations))
-
-		if len(responseObject.Observations) == 0 {
-			log.Printf("No observations found in API response")
-			http.Error(w, "No weather data available", http.StatusServiceUnavailable)
+			log.Printf("Error getting weather data: %v", err)
+			http.Error(w, "Weather data unavailable", http.StatusServiceUnavailable)
 			return
 		}
 
