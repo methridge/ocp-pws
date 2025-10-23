@@ -139,45 +139,12 @@ func readRandomSecret() (string, error) {
 	return strings.TrimSpace(string(content)), nil
 }
 
-// isWithinFetchWindow checks if the current time is within the fetch window
-// The fetch window is from the 5-minute boundary up to fetchBufferSeconds after
-func isWithinFetchWindow(t time.Time) bool {
-	// Get the current 5-minute window start
-	windowStart := t.Truncate(5 * time.Minute)
-
-	// Calculate seconds since the window start
-	secondsSinceWindow := int(t.Sub(windowStart).Seconds())
-
-	// Allow fetching from 0 to fetchBufferSeconds after each 5-minute boundary
-	return secondsSinceWindow >= 0 && secondsSinceWindow <= fetchBufferSeconds
-}
-
-// parseObsTimeLocal parses the obsTimeLocal string and returns a time.Time
-func parseObsTimeLocal(obsTimeLocal string) (time.Time, error) {
-	// Try common formats that Weather Underground might use
-	formats := []string{
-		"2006-01-02 3:04 PM MST",
-		"2006-01-02 15:04 MST",
-		"1/2/2006 3:04:05 PM",
-		"1/2/2006 15:04:05",
-		"2006-01-02T15:04:05-07:00",
-		"2006-01-02 15:04:05",
-	}
-
-	for _, format := range formats {
-		if t, err := time.Parse(format, obsTimeLocal); err == nil {
-			return t, nil
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("unable to parse obsTimeLocal: %s", obsTimeLocal)
-}
-
-// isDataFresh checks if the observation data is less than 5 minutes old using UTC time
+// isDataFresh checks if the observation data is reasonably current
+// With 30-minute fetch intervals, we accept data up to 35 minutes old
 func isDataFresh(obsTimeUtc time.Time) (bool, time.Time, error) {
 	now := time.Now().UTC()
 	age := now.Sub(obsTimeUtc)
-	isFresh := age <= 5*time.Minute
+	isFresh := age <= 35*time.Minute
 
 	log.Printf("Data observation time (UTC): %s, current time (UTC): %s, age: %v, fresh: %t",
 		obsTimeUtc.Format("15:04:05"), now.Format("15:04:05"), age, isFresh)
@@ -195,23 +162,16 @@ func shouldFetchNewData(t time.Time) bool {
 		return true
 	}
 
-	// Check if cached data is stale (observation time > 5 minutes ago)
-	if !cache.dataAge.IsZero() {
-		age := t.Sub(cache.dataAge)
-		if age > 5*time.Minute {
-			log.Printf("Cached data is stale (age: %v), will fetch new data", age)
-			return true
-		}
-	}
-
-	// Don't fetch too frequently (respect a minimum interval of 30 seconds between API calls)
+	// Enforce minimum 30-minute interval between API calls to avoid overloading the API
 	timeSinceLastFetch := t.Sub(cache.lastFetched)
-	if timeSinceLastFetch < 30*time.Second {
-		log.Printf("Rate limiting: last fetch was %v ago, waiting...", timeSinceLastFetch)
+	if timeSinceLastFetch < 30*time.Minute {
+		log.Printf("Rate limiting: last fetch was %v ago, must wait 30 minutes between fetches", timeSinceLastFetch)
 		return false
 	}
 
-	return false
+	// If we've waited 30+ minutes, fetch new data
+	log.Printf("30 minutes elapsed since last fetch (%v ago), will fetch new data", timeSinceLastFetch)
+	return true
 }
 
 // fetchWeatherData fetches weather data from the API and caches it
@@ -289,55 +249,39 @@ func fetchWeatherData() (weatherCurrent, error) {
 // getCachedWeatherData returns cached weather data or fetches new data if needed
 func getCachedWeatherData() (weatherCurrent, error) {
 	now := time.Now()
-	maxRetries := 3
-	retryDelay := 5 * time.Second
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		if shouldFetchNewData(now) {
-			log.Printf("Attempt %d: Fetching new weather data at %s", attempt, now.Format("15:04:05"))
+	// Check if we should fetch new data (respects 30-minute minimum interval)
+	if shouldFetchNewData(now) {
+		log.Printf("Fetching new weather data at %s", now.Format("15:04:05"))
 
-			data, err := fetchWeatherData()
-			if err != nil {
-				if strings.Contains(err.Error(), "stale data") && attempt < maxRetries {
-					log.Printf("Got stale data, retrying in %v (attempt %d/%d)", retryDelay, attempt, maxRetries)
-					time.Sleep(retryDelay)
-					now = time.Now()
-					continue
-				}
-				return weatherCurrent{}, err
-			}
-			return data, nil
-		}
-
-		// Return cached data if it's still fresh
-		cache.mu.RLock()
-		if !cache.lastFetched.IsZero() && !cache.dataAge.IsZero() {
-			age := now.Sub(cache.dataAge)
-			if age <= 5*time.Minute {
-				log.Printf("Using cached weather data (observation age: %v)", age)
-				data := cache.data
-				cache.mu.RUnlock()
-				return data, nil
-			}
-		}
-		cache.mu.RUnlock()
-
-		// If we reach here, cached data is stale, force a fetch
-		log.Printf("Cached data is stale, forcing fetch")
 		data, err := fetchWeatherData()
 		if err != nil {
-			if strings.Contains(err.Error(), "stale data") && attempt < maxRetries {
-				log.Printf("Got stale data, retrying in %v (attempt %d/%d)", retryDelay, attempt, maxRetries)
-				time.Sleep(retryDelay)
-				now = time.Now()
-				continue
+			// If we have cached data, return it even if fetch failed
+			cache.mu.RLock()
+			if !cache.lastFetched.IsZero() {
+				log.Printf("Fetch failed, but returning cached data from %s: %v", cache.lastFetched.Format("15:04:05"), err)
+				cachedData := cache.data
+				cache.mu.RUnlock()
+				return cachedData, nil
 			}
+			cache.mu.RUnlock()
 			return weatherCurrent{}, err
 		}
 		return data, nil
 	}
 
-	return weatherCurrent{}, fmt.Errorf("failed to get fresh weather data after %d attempts", maxRetries)
+	// Return cached data
+	cache.mu.RLock()
+	if !cache.lastFetched.IsZero() {
+		timeSinceLastFetch := now.Sub(cache.lastFetched)
+		log.Printf("Using cached weather data (fetched %v ago)", timeSinceLastFetch)
+		data := cache.data
+		cache.mu.RUnlock()
+		return data, nil
+	}
+	cache.mu.RUnlock()
+
+	return weatherCurrent{}, fmt.Errorf("no cached weather data available")
 }
 
 func main() {
