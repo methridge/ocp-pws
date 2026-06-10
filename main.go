@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -23,22 +24,15 @@ var staticFiles embed.FS
 var templateFiles embed.FS
 
 type weatherObservation struct {
-	StationID         string      `json:"stationID"`
-	ObsTimeUtc        time.Time   `json:"obsTimeUtc"`
-	ObsTimeLocal      string      `json:"obsTimeLocal"`
-	Neighborhood      string      `json:"neighborhood"`
-	SoftwareType      string      `json:"softwareType"`
-	Country           string      `json:"country"`
-	SolarRadiation    float64     `json:"solarRadiation"`
-	Lon               float64     `json:"lon"`
-	RealtimeFrequency interface{} `json:"realtimeFrequency"`
-	Epoch             int         `json:"epoch"`
-	Lat               float64     `json:"lat"`
-	Uv                float64     `json:"uv"`
-	Winddir           int         `json:"winddir"`
-	Humidity          int         `json:"humidity"`
-	QcStatus          int         `json:"qcStatus"`
-	Imperial          struct {
+	StationID      string    `json:"stationID"`
+	ObsTimeUtc     time.Time `json:"obsTimeUtc"`
+	ObsTimeLocal   string    `json:"obsTimeLocal"`
+	SolarRadiation float64   `json:"solarRadiation"`
+	Epoch          int       `json:"epoch"`
+	Uv             float64   `json:"uv"`
+	Winddir        int       `json:"winddir"`
+	Humidity       int       `json:"humidity"`
+	Imperial       struct {
 		Temp        int     `json:"temp"`
 		HeatIndex   int     `json:"heatIndex"`
 		Dewpt       int     `json:"dewpt"`
@@ -177,6 +171,9 @@ func readRandomSecret() (string, error) {
 // isDataFresh checks if the observation data is reasonably current
 // With 30-minute fetch intervals, we accept data up to 35 minutes old
 func isDataFresh(obsTimeUtc time.Time) (bool, time.Time, error) {
+	if obsTimeUtc.IsZero() {
+		return false, obsTimeUtc, fmt.Errorf("observation timestamp is unset")
+	}
 	now := time.Now().UTC()
 	age := now.Sub(obsTimeUtc)
 	isFresh := age <= 35*time.Minute
@@ -334,8 +331,8 @@ func convertWLToLegacy(wl wlCurrentResponse) (weatherCurrent, error) {
 	observation.Imperial.HeatIndex = extractInt("heat_index")
 	observation.Imperial.Dewpt = extractInt("dew_point")
 	observation.Imperial.WindChill = extractInt("wind_chill")
-	observation.Imperial.WindSpeed = extractInt("wind_speed_last")
-	observation.Imperial.WindGust = extractInt("wind_speed_hi_last_2_min")
+	observation.Imperial.WindSpeed = int(math.Round(extractFloat("wind_speed_last")))
+	observation.Imperial.WindGust = int(math.Round(extractFloat("wind_speed_hi_last_2_min")))
 
 	if baroData != nil {
 		if v, ok := baroData["bar_sea_level"]; ok && v != nil {
@@ -396,12 +393,6 @@ func fetchWeatherData() (weatherCurrent, error) {
 	responseObject, err := convertWLToLegacy(wlResponse)
 	if err != nil {
 		return weatherCurrent{}, err
-	}
-
-	log.Printf("Number of observations in response: %d", len(responseObject.Observations))
-
-	if len(responseObject.Observations) == 0 {
-		return weatherCurrent{}, fmt.Errorf("no observations found in API response")
 	}
 
 	obs := responseObject.Observations[0]

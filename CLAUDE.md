@@ -15,7 +15,7 @@ Binary serves on `:8080`.
 
 ### Local Development
 
-Copy `.envrc` and populate the required env vars before running the binary directly:
+Run locally with `direnv exec . ./pws` (the `.envrc` resolves secrets from 1Password via `op read --cache "op://Parents/WeatherLink/API/{key,secret}"`). Copy `.envrc` and populate the required env vars before running the binary directly:
 
 | Variable | Purpose |
 |---|---|
@@ -43,9 +43,17 @@ Copy `.envrc` and populate the required env vars before running the binary direc
 
 1. `GET /` → single handler renders `templates/index.html` with processed `Index` struct
 2. `getCachedWeatherData()` checks `weatherCache` — fetches from WeatherLink only if > 30 min since last call
-3. `discoverStationID()` calls `GET /stations` once (mutex-protected), then caches the station ID
-4. `fetchWeatherData()` calls `GET /current/{stationID}` and passes the raw response through `convertWLToLegacy()`, which extracts ISS current conditions — sensor type 43/struct 23 (WeatherLink Console) or 45/struct 10 (WeatherLink Live); barometric pressure comes from sensor type 242/struct 19
+3. `discoverStationID()` runs once at startup in `main()` (fails fast on bad key/network) and caches the ID via double-checked locking under `stationIDMutex`
+4. `fetchWeatherData()` calls `GET /current/{stationID}` and passes the raw response through `convertWLToLegacy()`, which extracts ISS current conditions — sensor type 43/struct 23 (WeatherLink Console) or 45/struct 10 (WeatherLink Live); barometric pressure comes from sensor type 242/struct 19; local report time is built from the `tz_offset` field in the sensor data
 5. `GET /static/` serves embedded CSS and SVG logos
+
+### Decisions & Gotchas
+
+- **Env var fallback** in `readAPIConfig()`/`readRandomSecret()` exists only so local dev doesn't need `/mnt/secrets/` files; production always reads the mounted files. Env var names are derived from the secret filename via `strings.ToUpper()` (`api_secret` → `API_SECRET`) — keep the two in sync.
+- **`convertWLToLegacy()` reshapes the WeatherLink v2 response into the internal `weatherObservation`** (a frozen copy of the old Wunderground shape).
+- **Wind speed is rounded to int** (`Imperial.WindSpeed` is `int`), so WeatherLink's fractional mph is rounded (e.g. 20.69 → 21).
+- **Single-station assumption**: `discoverStationID()` uses `Stations[0]`; an API key with multiple stations always picks the first.
+- **Sensor type 43/struct 23 is WeatherLink Console** — the original conversion only handled 45/struct 10 (WeatherLink Live) and failed against a Console station until both were supported.
 
 ### Caching & Rate Limits
 

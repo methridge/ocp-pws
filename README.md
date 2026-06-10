@@ -6,4 +6,5 @@ to run in [OpenShift](https://www.openshift.com/). This also uses
 [Vault Secrets Operator](https://developer.hashicorp.com/vault/docs/deploy/kubernetes/vso)
 to retrieve secrets.
 
-Reads the current conditions from Wunderground.com for my PWS.
+Reads the current conditions from [WeatherLink v2 API](https://weatherlink.github.io/v2-api/)
+for a Davis Instruments Personal Weather Station.
