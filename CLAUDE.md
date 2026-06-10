@@ -33,7 +33,7 @@ Copy `.envrc` and populate the required env vars before running the binary direc
 ### Secrets & Config
 
 - **Production**: Vault Secrets Operator mounts credentials at `/mnt/secrets/{api,key,api_secret,rsec,fetch_buffer}`
-- **Local dev**: `readAPIConfig()` falls back to env vars when the secrets directory is absent
+- **Local dev**: if a secrets file is missing, `readAPIConfig()` falls back to the uppercase env var (`API`, `KEY`, `API_SECRET`); `readRandomSecret()` falls back to `RANDOM_SECRET`
 
 ### Embedded Assets
 
@@ -44,7 +44,7 @@ Copy `.envrc` and populate the required env vars before running the binary direc
 1. `GET /` → single handler renders `templates/index.html` with processed `Index` struct
 2. `getCachedWeatherData()` checks `weatherCache` — fetches from WeatherLink only if > 30 min since last call
 3. `discoverStationID()` calls `GET /stations` once (mutex-protected), then caches the station ID
-4. `fetchWeatherData()` calls `GET /current/{stationID}` and passes the raw response through `convertWLToLegacy()`, which extracts sensor type 45 / data structure 10 (ISS current conditions)
+4. `fetchWeatherData()` calls `GET /current/{stationID}` and passes the raw response through `convertWLToLegacy()`, which extracts ISS current conditions — sensor type 43/struct 23 (WeatherLink Console) or 45/struct 10 (WeatherLink Live); barometric pressure comes from sensor type 242/struct 19
 5. `GET /static/` serves embedded CSS and SVG logos
 
 ### Caching & Rate Limits
