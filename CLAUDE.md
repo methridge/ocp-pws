@@ -64,3 +64,7 @@ Run locally with `direnv exec . ./pws` (the `.envrc` resolves secrets from 1Pass
 ### CI/CD
 
 GitHub Actions (`release.yml`) builds with Docker Buildx for `linux/amd64` and pushes to `ghcr.io/methridge/ocp-pws` on semver tags (`v*.*.*`), tagging major, minor, patch, and `latest`.
+
+- **Releasing**: push an annotated semver tag (`git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`) to trigger a release. `v2.0.0` was the WeatherLink v2 conversion (breaking: env vars renamed, station auto-discovery).
+- **Testing the workflow without a new tag**: the workflow has a `workflow_dispatch` input — `gh workflow run release.yml -f tag=vX.Y.Z` re-runs the build against an existing tag. A plain push to `main` does **not** trigger it (semver-tag-gated).
+- **Action versions**: pinned to Node.js 24-compatible majors (`checkout@v6`, `setup-buildx-action@v4`, `login-action@v4`, `metadata-action@v6`, `build-push-action@v7`) — GitHub forces Node 20 actions to Node 24 on 2026-06-16.
