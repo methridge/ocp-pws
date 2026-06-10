@@ -80,7 +80,7 @@ load_envrc() {
         fi
 
         # Verify required environment variables are set
-        local required_vars=("API" "STATION_ID" "UNITS" "API_KEY" "RANDOM_SECRET")
+        local required_vars=("API" "KEY" "API_SECRET" "RANDOM_SECRET")
         local missing_vars=()
 
         for var in "${required_vars[@]}"; do
@@ -94,19 +94,17 @@ load_envrc() {
             printf '%s\n' "${missing_vars[@]}"
             echo ""
             echo "Please ensure your .envrc file contains all required variables:"
-            echo "  export API=\"https://api.weather.com/v2/pws/observations/current\""
-            echo "  export STATION_ID=\"YOUR_STATION_ID\""
-            echo "  export UNITS=\"e\""
-            echo "  export API_KEY=\"YOUR_API_KEY\""
+            echo "  export API=\"https://api.weatherlink.com/v2\""
+            echo "  export KEY=\"YOUR_WEATHERLINK_API_KEY\""
+            echo "  export API_SECRET=\"YOUR_WEATHERLINK_API_SECRET\""
             echo "  export RANDOM_SECRET=\"YOUR_RANDOM_SECRET\""
             exit 1
         fi
 
         echo -e "${GREEN}Environment variables loaded successfully:${NC}"
         echo "  API: ${API}"
-        echo "  STATION_ID: ${STATION_ID}"
-        echo "  UNITS: ${UNITS}"
-        echo "  API_KEY: [HIDDEN]"
+        echo "  KEY: [HIDDEN]"
+        echo "  API_SECRET: [HIDDEN]"
         echo "  RANDOM_SECRET: [HIDDEN]"
         echo ""
     else
@@ -218,13 +216,8 @@ if ! docker image inspect "$FULL_IMAGE" &> /dev/null; then
     echo -e "${YELLOW}Would you like to build it? (y/N)${NC}"
     read -r response
     if [[ "$response" =~ ^[Yy]$ ]]; then
-        if [[ -f "build-docker.sh" ]]; then
-            echo -e "${BLUE}Building image...${NC}"
-            ./build-docker.sh -n "$IMAGE_NAME" -t "$IMAGE_TAG"
-        else
-            echo -e "${RED}build-docker.sh not found. Please build the image manually.${NC}"
-            exit 1
-        fi
+        echo -e "${BLUE}Building image...${NC}"
+        task build-container
     else
         echo -e "${RED}Cannot run container without image. Exiting.${NC}"
         exit 1
@@ -255,9 +248,8 @@ DOCKER_CMD="$DOCKER_CMD -p $PORT:8080"
 
 # Add environment variables
 DOCKER_CMD="$DOCKER_CMD -e API=\"$API\""
-DOCKER_CMD="$DOCKER_CMD -e STATION_ID=\"$STATION_ID\""
-DOCKER_CMD="$DOCKER_CMD -e UNITS=\"$UNITS\""
-DOCKER_CMD="$DOCKER_CMD -e API_KEY=\"$API_KEY\""
+DOCKER_CMD="$DOCKER_CMD -e KEY=\"$KEY\""
+DOCKER_CMD="$DOCKER_CMD -e API_SECRET=\"$API_SECRET\""
 DOCKER_CMD="$DOCKER_CMD -e RANDOM_SECRET=\"$RANDOM_SECRET\""
 
 # Add debug flag if set
