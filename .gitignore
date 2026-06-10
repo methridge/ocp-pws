@@ -1,0 +1,9 @@
+# Build output
+pws
+
+# Go build cache and test artifacts
+*.test
+*.out
+
+# Environment / secrets
+.envrc.local
