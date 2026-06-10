@@ -213,10 +213,17 @@ func shouldFetchNewData(t time.Time) bool {
 func discoverStationID() (int64, error) {
 	stationIDMutex.RLock()
 	if cachedStationID != 0 {
-		defer stationIDMutex.RUnlock()
-		return cachedStationID, nil
+		id := cachedStationID
+		stationIDMutex.RUnlock()
+		return id, nil
 	}
 	stationIDMutex.RUnlock()
+
+	stationIDMutex.Lock()
+	defer stationIDMutex.Unlock()
+	if cachedStationID != 0 {
+		return cachedStationID, nil
+	}
 
 	url := fmt.Sprintf("%s/stations?api-key=%s", api, key)
 
@@ -256,9 +263,7 @@ func discoverStationID() (int64, error) {
 		return 0, fmt.Errorf("no stations found for this API key")
 	}
 
-	stationIDMutex.Lock()
 	cachedStationID = stationsResp.Stations[0].StationID
-	stationIDMutex.Unlock()
 
 	log.Printf("Discovered station ID: %d (%s)", stationsResp.Stations[0].StationID, stationsResp.Stations[0].StationName)
 
@@ -297,7 +302,6 @@ func convertWLToLegacy(wl wlCurrentResponse) (weatherCurrent, error) {
 		return weatherCurrent{}, fmt.Errorf("missing or invalid timestamp in sensor data")
 	}
 	obsTime := time.Unix(int64(ts), 0).UTC()
-	obsTimeLocal := obsTime.Format("2006-01-02 15:04:05 MST")
 
 	extractFloat := func(key string) float64 {
 		if v, ok := issData[key]; ok && v != nil {
@@ -311,6 +315,9 @@ func convertWLToLegacy(wl wlCurrentResponse) (weatherCurrent, error) {
 	extractInt := func(key string) int {
 		return int(extractFloat(key))
 	}
+
+	tzOffsetSec := int(extractFloat("tz_offset"))
+	obsTimeLocal := time.Unix(int64(ts), 0).In(time.FixedZone("", tzOffsetSec)).Format("2006-01-02 15:04:05 -07:00")
 
 	observation := weatherObservation{
 		StationID:      fmt.Sprintf("%d", wl.StationID),
@@ -373,7 +380,7 @@ func fetchWeatherData() (weatherCurrent, error) {
 	}
 
 	log.Printf("API response body length: %d bytes", len(bodyBytes))
-	if len(bodyBytes) > 0 {
+	if _, ok := os.LookupEnv("DEBUG"); ok {
 		log.Printf("Raw API response: %s", string(bodyBytes))
 	}
 
@@ -462,6 +469,10 @@ func main() {
 		log.Fatal("Configuration error:", err)
 	}
 
+	if _, err := discoverStationID(); err != nil {
+		log.Fatal("Failed to discover station ID:", err)
+	}
+
 	// Debug printing of Environment
 	if _, ok := os.LookupEnv("DEBUG"); ok {
 		for _, element := range os.Environ() {
@@ -495,6 +506,12 @@ func main() {
 		responseObject, err := getCachedWeatherData()
 		if err != nil {
 			log.Printf("Error getting weather data: %v", err)
+			http.Error(w, "Weather data unavailable", http.StatusServiceUnavailable)
+			return
+		}
+
+		if len(responseObject.Observations) == 0 {
+			log.Printf("No observations in weather data")
 			http.Error(w, "Weather data unavailable", http.StatusServiceUnavailable)
 			return
 		}
