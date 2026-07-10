@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# https://taskfile.dev
+#
+# From methridge/taskfiles (canonical). In consumer repos this is vendored into
+# .taskfiles/shared/ — do not hand-edit there; edit upstream and run 'task sync'.
+#
+# Expects the consumer to define BINARY_NAME (and optionally LDFLAGS) in its
+# project vars.
+
+version: "3"
+
+tasks:
+  build:
+    desc: Build binary
+    preconditions:
+      - sh: 'command -v go >/dev/null 2>&1'
+        msg: "go toolchain required: https://go.dev/dl/"
+    cmds:
+      - echo "🔨 Building binary..."
+      - go mod tidy -v -x
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.BINARY_NAME}} .
+      - echo "✅ Build complete:" {{.BINARY_NAME}}
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - echo "🧹 Cleaning build artifacts..."
+      - go clean
+      - rm -f {{.BINARY_NAME}}
+      - echo "✅ Clean complete"
+
+  install:
+    desc: Install binary in ${HOME}/bin
+    deps: [build]
+    cmds:
+      - mv {{.BINARY_NAME}} ${HOME}/bin
+
+  mod-update:*:
+    desc: Update go.mod and go.sum and Go version
+    vars:
+      GO_VERSION: "{{index .MATCH 0}}"
+    cmds:
+      - go get -u ./...
+      - go mod tidy -v -x -go={{.GO_VERSION}}
+
+  mod-update:
+    desc: Update go.mod and go.sum
+    cmds:
+      - go get -u ./...
+      - go mod tidy -v -x
+
+  run:
+    desc: Run the binary locally
+    deps: [build]
+    cmds:
+      - echo "🚀 Running binary..."
+      - ./{{.BINARY_NAME}}
