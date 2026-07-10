@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# https://taskfile.dev
+#
+# Project-specific tasks (repo-owned; `task sync` never touches this file).
+
+version: "3"
+
+# Container build config (used only by build-container below). BINARY_NAME and
+# LDFLAGS for the shared `go build` task live in .envrc so the shared go.yml can
+# read them from the environment (direnv). run-container relies on .envrc too.
+vars:
+  IMAGE_NAME: "ocp-pws"
+  IMAGE_TAG: "minimal"
+  PLATFORM: "linux/amd64"
+  DOCKERFILE: "Dockerfile.minimal"
+
+tasks:
+  build-container:
+    desc: Build container
+    cmds:
+      - echo "🐳 Building container..."
+      - |
+        docker build \
+          --platform {{.PLATFORM}} \
+          --tag {{.IMAGE_NAME}}:{{.IMAGE_TAG}} \
+          --file {{.DOCKERFILE}} .
+      - echo "✅ Container build complete"
+
+  run-container:
+    desc: Run the container locally
+    cmds:
+      - echo "🐳 Running container..."
+      - ./run-container.sh
